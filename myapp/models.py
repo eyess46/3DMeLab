@@ -1,13 +1,15 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from django.contrib.auth.hashers import make_password, check_password
 from django.utils.crypto import get_random_string
 from django.utils import timezone
 from datetime import timedelta
-from django.contrib.auth.hashers import make_password, check_password
+
 
 class User(AbstractUser):
     username = None
-    email = models.EmailField(unique=True)
+    email = models.EmailField(unique=True, verbose_name='email address')
+
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
 
@@ -33,10 +35,11 @@ class VerificationCode(models.Model):
         return check_password(raw_code, self.code_hash)
 
     def is_expired(self) -> bool:
-        return timezone.now() > self.created_at + timedelta(minutes=20)
+        expiry_time = self.created_at + timedelta(minutes=20)
+        return timezone.now() > expiry_time
 
     def __str__(self):
-        return f"Code for {self.user.email} ({'expired' if self.is_expired() else 'active'})"
+        return f"Code for {self.user.email}"
 
 
 class Contactform(models.Model):

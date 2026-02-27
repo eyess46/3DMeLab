@@ -1,38 +1,36 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from django.contrib.auth import authenticate, login, logout
+from rest_framework.authtoken.models import Token
+from django.contrib.auth import authenticate
 from django.core.mail import send_mail
 from django.conf import settings
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from .models import User, VerificationCode
 from .serializers import RegisterSerializer, VerifySerializer, LoginSerializer
-from rest_framework.permissions import IsAuthenticated
+from django.utils.crypto import get_random_string
 import requests
-
-
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
 
 
 
 def generate_otp():
-    from django.utils.crypto import get_random_string
     return get_random_string(length=6, allowed_chars='0123456789')
 
 
 def send_verification_email(email, code):
     subject = 'Your Verification Code'
-    message = f'Your verification code is: {code}\nExpires in 20 minutes.'
+    message = f'Your verification code is: {code}\n\nIt expires in 20 minutes.'
     send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [email])
 
 
 
-@method_decorator(csrf_exempt, name='dispatch')
 class RegisterView(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         serializer = RegisterSerializer(data=request.data)
         if serializer.is_valid():
-            user = serializer.save()
+            user = serializer.save(is_active=False)
             VerificationCode.objects.filter(user=user).delete()
 
             code = generate_otp()
@@ -40,12 +38,13 @@ class RegisterView(APIView):
             verification.set_code(code)
             send_verification_email(user.email, code)
 
-            return Response({"message": "Verification code sent to your email."})
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'message': 'Verification code sent to your email.'}, status=201)
+        return Response(serializer.errors, status=400)
 
 
-@method_decorator(csrf_exempt, name='dispatch')
 class VerifyCodeView(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         serializer = VerifySerializer(data=request.data)
         if serializer.is_valid():
@@ -58,107 +57,83 @@ class VerifyCodeView(APIView):
                     user.is_active = True
                     user.save()
                     verification.delete()
-                    return Response({"message": "Email verified successfully!"})
+                    token, _ = Token.objects.get_or_create(user=user)
+                    return Response({'message': 'Email verified successfully!', 'token': token.key})
                 else:
-                    verification.attempts += 1
-                    verification.save()
-                    if verification.attempts >= 5:
-                        verification.delete()
-                        return Response(
-                            {"error": "Too many attempts, please register again."},
-                            status=status.HTTP_400_BAD_REQUEST
-                        )
-                    return Response({"error": "Invalid or expired code."},
-                                    status=status.HTTP_400_BAD_REQUEST)
-            except User.DoesNotExist:
-                return Response({"error": "No pending registration found."},
-                                status=status.HTTP_400_BAD_REQUEST)
-            except VerificationCode.DoesNotExist:
-                return Response({"error": "Verification session expired."},
-                                status=status.HTTP_400_BAD_REQUEST)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({'error': 'Invalid or expired code.'}, status=400)
+            except (User.DoesNotExist, VerificationCode.DoesNotExist):
+                return Response({'error': 'Invalid verification request.'}, status=400)
+        return Response(serializer.errors, status=400)
 
 
-@method_decorator(csrf_exempt, name='dispatch')
+
 class LoginView(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         serializer = LoginSerializer(data=request.data)
         if serializer.is_valid():
-            user = authenticate(
-                email=serializer.validated_data['email'],
-                password=serializer.validated_data['password']
-            )
-            if user:
-                if not user.is_active:
-                    return Response(
-                        {"error": "Please verify your email first."},
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                login(request, user)
-                return Response({"message": "Login successful.", "email": user.email})
-            return Response({"error": "Invalid credentials."},
-                            status=status.HTTP_400_BAD_REQUEST)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            email = serializer.validated_data['email']
+            password = serializer.validated_data['password']
+            user = authenticate(request, email=email, password=password)
+            if user and user.is_active:
+                token, _ = Token.objects.get_or_create(user=user)
+                return Response({'message': 'Login successful', 'token': token.key, 'email': user.email})
+            return Response({'error': 'Invalid credentials or unverified account.'}, status=400)
+        return Response(serializer.errors, status=400)
 
 
-@method_decorator(csrf_exempt, name='dispatch')
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        logout(request)
-        return Response({"message": "Logout successful."}, status=status.HTTP_200_OK)
+        Token.objects.filter(user=request.user).delete()
+        return Response({'message': 'Logout successful.'}, status=200)
 
 
 
-
-@method_decorator(csrf_exempt, name='dispatch')
 class GoogleLoginView(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         access_token = request.data.get('access_token')
         if not access_token:
-            return Response({'error': 'Access token required'},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Access token required'}, status=400)
 
-        # Verify token with Google API
         url = f'https://www.googleapis.com/oauth2/v3/userinfo?access_token={access_token}'
         resp = requests.get(url)
         if resp.status_code != 200:
-            return Response({'error': 'Invalid Google token'},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Invalid Google token'}, status=400)
 
         data = resp.json()
         email = data.get('email')
         if not email:
-            return Response({'error': 'No email returned from Google'},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'No email returned from Google'}, status=400)
 
-        user, created = User.objects.get_or_create(email=email, defaults={'is_active': True})
-        login(request, user)
-        return Response({'message': 'Google login successful', 'email': user.email})
+        user, _ = User.objects.get_or_create(email=email, defaults={'is_active': True})
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({'message': 'Google login successful', 'token': token.key, 'email': user.email})
 
 
-@method_decorator(csrf_exempt, name='dispatch')
+
 class FacebookLoginView(APIView):
+    permission_classes = [AllowAny]
+
     def post(self, request):
         access_token = request.data.get('access_token')
         if not access_token:
-            return Response({'error': 'Access token required'},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Access token required'}, status=400)
 
-        # Verify token with Facebook API
         url = f'https://graph.facebook.com/me?fields=id,name,email&access_token={access_token}'
         resp = requests.get(url)
         if resp.status_code != 200:
-            return Response({'error': 'Invalid Facebook token'},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Invalid Facebook token'}, status=400)
 
         data = resp.json()
         email = data.get('email')
         if not email:
-            return Response({'error': 'No email returned from Facebook'},
-                            status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'No email returned from Facebook'}, status=400)
 
-        user, created = User.objects.get_or_create(email=email, defaults={'is_active': True})
-        login(request, user)
-        return Response({'message': 'Facebook login successful', 'email': user.email})
+        user, _ = User.objects.get_or_create(email=email, defaults={'is_active': True})
+        token, _ = Token.objects.get_or_create(user=user)
+        return Response({'message': 'Facebook login successful', 'token': token.key, 'email': user.email})

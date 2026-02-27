@@ -42,7 +42,7 @@ INSTALLED_APPS = [
     'myapp',
     
     'rest_framework',
-    'rest_framework.authtoken',   
+    'rest_framework.authtoken',
     'dj_rest_auth',
     'allauth',
     'allauth.account',
@@ -155,9 +155,12 @@ LOGIN_REDIRECT_URL = "dashboard"
 
 AUTH_USER_MODEL = 'myapp.User'
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
-        'rest_framework.authentication.SessionAuthentication',  
-    ),
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
 }
 
 # Allauth config (required)
