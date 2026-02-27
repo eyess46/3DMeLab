@@ -56,6 +56,7 @@ MIDDLEWARE = [
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
 
     'allauth.account.middleware.AccountMiddleware',
@@ -162,6 +163,11 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ],
 }
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "https://yourfrontend.com",
+]
 
 # Allauth config (required)
 SITE_ID = 1
