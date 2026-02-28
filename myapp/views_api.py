@@ -8,6 +8,7 @@ from django.conf import settings
 from .models import User, VerificationCode
 from .serializers import RegisterSerializer, VerifySerializer, LoginSerializer
 from django.utils.crypto import get_random_string
+from rest_framework.authtoken.models import Token
 import requests
 
 
@@ -73,13 +74,36 @@ class LoginView(APIView):
             return Response({'error': 'Invalid credentials or unverified account.'}, status=400)
         return Response(serializer.errors, status=400)
 
+class LoginView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data['email']
+            password = serializer.validated_data['password']
+            user = authenticate(request, email=email, password=password)
+            if user and user.is_active:
+                token, _ = Token.objects.get_or_create(user=user)
+                
+                return Response({'token': token.key, 'message': 'Login successful.'})
+            return Response(
+                {'error': 'Invalid credentials or unverified account.'},
+                status=400
+            )
+        return Response(serializer.errors, status=400)
+
+
 
 class LogoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        logout(request)
+        # delete the token the client supplied
+        if request.auth:
+            request.auth.delete()
         return Response({'message': 'Logout successful.'})
+
 
 
 # Social logins
