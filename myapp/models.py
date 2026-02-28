@@ -1,46 +1,54 @@
+from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin
 from django.db import models
-from django.contrib.auth.models import AbstractUser
-from django.contrib.auth.hashers import make_password, check_password
-from django.utils.crypto import get_random_string
 from django.utils import timezone
-from datetime import timedelta
+from django.contrib.auth.base_user import BaseUserManager
+import hashlib
+import time
 
 
-class User(AbstractUser):
-    username = None
-    email = models.EmailField(unique=True, verbose_name='email address')
+class UserManager(BaseUserManager):
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError("Email must be set")
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
 
-    USERNAME_FIELD = 'email'
+    def create_superuser(self, email, password=None, **extra_fields):
+        extra_fields.setdefault("is_staff", True)
+        extra_fields.setdefault("is_superuser", True)
+        return self.create_user(email, password, **extra_fields)
+
+
+class User(AbstractBaseUser, PermissionsMixin):
+    email = models.EmailField(unique=True)
+    first_name = models.CharField(max_length=30, blank=True)
+    last_name = models.CharField(max_length=30, blank=True)
+    is_active = models.BooleanField(default=False)
+    is_staff = models.BooleanField(default=False)
+    date_joined = models.DateTimeField(default=timezone.now)
+
+    objects = UserManager()
+
+    USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
-
-    def __str__(self):
-        return self.email
 
 
 class VerificationCode(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
-    code_hash = models.CharField(max_length=128, blank=True)
+    code_hash = models.CharField(max_length=64)
     created_at = models.DateTimeField(auto_now_add=True)
-    attempts = models.PositiveSmallIntegerField(default=0)
 
-    def set_code(self, raw_code: str):
-        self.code_hash = make_password(raw_code)
-        self.created_at = timezone.now()
-        self.attempts = 0
+    def set_code(self, code):
+        self.code_hash = hashlib.sha256(code.encode()).hexdigest()
         self.save()
 
-    def check_code(self, raw_code: str) -> bool:
-        if self.is_expired():
+    def check_code(self, code):
+        if (timezone.now() - self.created_at).seconds > 20 * 60:
             return False
-        return check_password(raw_code, self.code_hash)
-
-    def is_expired(self) -> bool:
-        expiry_time = self.created_at + timedelta(minutes=20)
-        return timezone.now() > expiry_time
-
-    def __str__(self):
-        return f"Code for {self.user.email}"
-
+        return self.code_hash == hashlib.sha256(code.encode()).hexdigest()
 
 class Contactform(models.Model):
     name = models.CharField(max_length=100)

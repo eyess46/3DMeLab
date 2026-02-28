@@ -32,10 +32,7 @@ class CustomUserAdmin(UserAdmin):
         }),
     )
 
-    # Hide username field completely (it's None anyway)
     exclude = ('username',)
-
-    # Optional: readonly fields if you want to protect certain data
     readonly_fields = ('last_login', 'date_joined')
 
 
@@ -43,37 +40,32 @@ class CustomUserAdmin(UserAdmin):
 class VerificationCodeAdmin(admin.ModelAdmin):
     """
     Admin view for email verification codes.
-    Shows status (expired/active), attempts, but NEVER shows the actual code.
+    Shows status (expired/active), but NEVER the actual code.
     """
     list_display = (
         'user_email',
         'status_display',
-        'attempts',
         'created_at',
         'is_expired_flag',
     )
-    list_filter = ('created_at', 'attempts')
+    list_filter = ('created_at',)
     search_fields = ('user__email',)
     ordering = ('-created_at',)
 
-    # Make almost everything read-only
     readonly_fields = (
         'user',
         'created_at',
-        'attempts',
         'hashed_code_preview',
         'status_display',
         'is_expired_flag',
     )
 
-    # Prevent anyone from adding/editing codes manually
     def has_add_permission(self, request):
         return False
 
     def has_change_permission(self, request, obj=None):
         return False   # view-only — no edits allowed
 
-    # Custom display fields
     @admin.display(description='Email')
     def user_email(self, obj):
         return obj.user.email
@@ -94,13 +86,12 @@ class VerificationCodeAdmin(admin.ModelAdmin):
             return obj.code_hash[:16] + "..." + obj.code_hash[-8:]
         return "—"
 
-    # Fieldsets for clean layout
     fieldsets = (
         (None, {
             'fields': ('user', 'user_email', 'status_display', 'is_expired_flag')
         }),
         ('Security Info', {
-            'fields': ('hashed_code_preview', 'attempts', 'created_at'),
+            'fields': ('hashed_code_preview', 'created_at'),
             'classes': ('collapse',),
         }),
     )
